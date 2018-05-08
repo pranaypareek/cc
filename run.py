@@ -1,7 +1,7 @@
 """
-Pet Service Runner
+Item Service Runner
 
-Start the Pet Service and initializes logging
+Start the Item Service and initializes logging
 """
 
 import os

@@ -15,16 +15,16 @@
 ######################################################################
 
 """
-Pet Store Service with UI
+Item Store Service with UI
 
 Paths:
 ------
 GET / - Displays a UI for Selenium testing
-GET /pets - Returns a list all of the Pets
-GET /pets/{id} - Returns the Pet with a given id number
-POST /pets - creates a new Pet record in the database
-PUT /pets/{id} - updates a Pet record in the database
-DELETE /pets/{id} - deletes a Pet record in the database
+GET /items - Returns a list all of the Items
+GET /items/{id} - Returns the Item with a given id number
+POST /items - creates a new Item record in the database
+PUT /items/{id} - updates a Item record in the database
+DELETE /items/{id} - deletes a Item record in the database
 """
 
 import sys
@@ -32,8 +32,23 @@ import logging
 from flask import jsonify, request, json, url_for, make_response, abort
 from flask_api import status    # HTTP Status Codes
 from werkzeug.exceptions import NotFound
-from app.models import Pet
+from app.models import Item
 from . import app
+
+import eventlet
+from flask_mqtt import Mqtt
+from flask_socketio import SocketIO
+from flask_bootstrap import Bootstrap
+
+eventlet.monkey_patch()
+
+mqtt = Mqtt(app)
+socketio = SocketIO(app)
+bootstrap = Bootstrap(app)
+count = 0
+
+topic = 'channel01'
+message = ''
 
 # Error handlers reuire app to be initialized so we must import
 # then only after we have initialized the Flask app instance
@@ -52,54 +67,54 @@ def healthcheck():
 ######################################################################
 @app.route('/')
 def index():
-    # data = '{name: <string>, category: <string>}'
-    # url = request.base_url + 'pets' # url_for('list_pets')
-    # return jsonify(name='Pet Demo REST API Service', version='1.0', url=url, data=data), status.HTTP_200_OK
+    # data = '{name: <string>, price: <string>}'
+    # url = request.base_url + 'items' # url_for('list_items')
+    # return jsonify(name='Item Demo REST API Service', version='1.0', url=url, data=data), status.HTTP_200_OK
     return app.send_static_file('index.html')
 
 ######################################################################
 # LIST ALL PETS
 ######################################################################
-@app.route('/pets', methods=['GET'])
-def list_pets():
-    """ Returns all of the Pets """
-    pets = []
-    category = request.args.get('category')
+@app.route('/items', methods=['GET'])
+def list_items():
+    """ Returns all of the Items """
+    items = []
+    price = request.args.get('price')
     name = request.args.get('name')
-    if category:
-        pets = Pet.find_by_category(category)
+    if price:
+        items = Item.find_by_price(price)
     elif name:
-        pets = Pet.find_by_name(name)
+        items = Item.find_by_name(name)
     else:
-        pets = Pet.all()
+        items = Item.all()
 
-    results = [pet.serialize() for pet in pets]
+    results = [item.serialize() for item in items]
     return make_response(jsonify(results), status.HTTP_200_OK)
 
 
 ######################################################################
 # RETRIEVE A PET
 ######################################################################
-@app.route('/pets/<int:pet_id>', methods=['GET'])
-def get_pets(pet_id):
+@app.route('/items/<int:item_id>', methods=['GET'])
+def get_items(item_id):
     """
-    Retrieve a single Pet
+    Retrieve a single Item
 
-    This endpoint will return a Pet based on it's id
+    This endpoint will return a Item based on it's id
     """
-    pet = Pet.find(pet_id)
-    if not pet:
-        raise NotFound("Pet with id '{}' was not found.".format(pet_id))
-    return make_response(jsonify(pet.serialize()), status.HTTP_200_OK)
+    item = Item.find(item_id)
+    if not item:
+        raise NotFound("Item with id '{}' was not found.".format(item_id))
+    return make_response(jsonify(item.serialize()), status.HTTP_200_OK)
 
 ######################################################################
 # ADD A NEW PET
 ######################################################################
-@app.route('/pets', methods=['POST'])
-def create_pets():
+@app.route('/items', methods=['POST'])
+def create_items():
     """
-    Creates a Pet
-    This endpoint will create a Pet based the data in the body that is posted
+    Creates a Item
+    This endpoint will create a Item based the data in the body that is posted
     """
     data = {}
     # Check for form submission data
@@ -107,18 +122,18 @@ def create_pets():
         app.logger.info('Getting data from form submit')
         data = {
             'name': request.form['name'],
-            'category': request.form['category'],
+            'price': request.form['price'],
             'available': True
         }
     else:
         app.logger.info('Getting data from API call')
         data = request.get_json()
     app.logger.info(data)
-    pet = Pet()
-    pet.deserialize(data)
-    pet.save()
-    message = pet.serialize()
-    location_url = url_for('get_pets', pet_id=pet.id, _external=True)
+    item = Item()
+    item.deserialize(data)
+    item.save()
+    message = item.serialize()
+    location_url = url_for('get_items', item_id=item.id, _external=True)
     return make_response(jsonify(message), status.HTTP_201_CREATED,
                          {'Location': location_url})
 
@@ -126,61 +141,63 @@ def create_pets():
 ######################################################################
 # UPDATE AN EXISTING PET
 ######################################################################
-@app.route('/pets/<int:pet_id>', methods=['PUT'])
-def update_pets(pet_id):
+@app.route('/items/<int:item_id>', methods=['PUT'])
+def update_items(item_id):
     """
-    Update a Pet
+    Update a Item
 
-    This endpoint will update a Pet based the body that is posted
+    This endpoint will update a Item based the body that is posted
     """
     check_content_type('application/json')
-    pet = Pet.find(pet_id)
-    if not pet:
-        raise NotFound("Pet with id '{}' was not found.".format(pet_id))
+    item = Item.find(item_id)
+    if not item:
+        raise NotFound("Item with id '{}' was not found.".format(item_id))
     data = request.get_json()
     app.logger.info(data)
-    pet.deserialize(data)
-    pet.id = pet_id
-    pet.save()
-    return make_response(jsonify(pet.serialize()), status.HTTP_200_OK)
+    item.deserialize(data)
+    item.id = item_id
+    item.save()
+    mqtt_update_message = "Price of the Item with id '{}' and name '{}' was changed.".format(item_id, item.name)
+    mqtt.publish(topic, mqtt_update_message)
+    return make_response(jsonify(item.serialize()), status.HTTP_200_OK)
 
 ######################################################################
 # DELETE A PET
 ######################################################################
-@app.route('/pets/<int:pet_id>', methods=['DELETE'])
-def delete_pets(pet_id):
+@app.route('/items/<int:item_id>', methods=['DELETE'])
+def delete_items(item_id):
     """
-    Delete a Pet
+    Delete a Item
 
-    This endpoint will delete a Pet based the id specified in the path
+    This endpoint will delete a Item based the id specified in the path
     """
-    pet = Pet.find(pet_id)
-    if pet:
-        pet.delete()
+    item = Item.find(item_id)
+    if item:
+        item.delete()
     return make_response('', status.HTTP_204_NO_CONTENT)
 
 ######################################################################
 # PURCHASE A PET
 ######################################################################
-@app.route('/pets/<int:pet_id>/purchase', methods=['PUT'])
-def purchase_pets(pet_id):
-    """ Purchasing a Pet makes it unavailable """
-    pet = Pet.find(pet_id)
-    if not pet:
-        abort(status.HTTP_404_NOT_FOUND, "Pet with id '{}' was not found.".format(pet_id))
-    if not pet.available:
-        abort(status.HTTP_400_BAD_REQUEST, "Pet with id '{}' is not available.".format(pet_id))
-    pet.available = False
-    pet.save()
-    return make_response(jsonify(pet.serialize()), status.HTTP_200_OK)
+@app.route('/items/<int:item_id>/purchase', methods=['PUT'])
+def purchase_items(item_id):
+    """ Purchasing a Item makes it unavailable """
+    item = Item.find(item_id)
+    if not item:
+        abort(status.HTTP_404_NOT_FOUND, "Item with id '{}' was not found.".format(item_id))
+    if not item.available:
+        abort(status.HTTP_400_BAD_REQUEST, "Item with id '{}' is not available.".format(item_id))
+    item.available = False
+    item.save()
+    return make_response(jsonify(item.serialize()), status.HTTP_200_OK)
 
 ######################################################################
 # DELETE ALL PET DATA (for testing only)
 ######################################################################
-@app.route('/pets/reset', methods=['DELETE'])
-def pets_reset():
-    """ Removes all pets from the database """
-    Pet.remove_all()
+@app.route('/items/reset', methods=['DELETE'])
+def items_reset():
+    """ Removes all items from the database """
+    Item.remove_all()
     return make_response('', status.HTTP_204_NO_CONTENT)
 
 ######################################################################
@@ -190,17 +207,17 @@ def pets_reset():
 @app.before_first_request
 def init_db(redis=None):
     """ Initlaize the model """
-    Pet.init_db(redis)
+    Item.init_db(redis)
 
 # load sample data
 def data_load(payload):
-    """ Loads a Pet into the database """
-    pet = Pet(0, payload['name'], payload['category'])
-    pet.save()
+    """ Loads a Item into the database """
+    item = Item(0, payload['name'], payload['price'])
+    item.save()
 
 def data_reset():
-    """ Removes all Pets from the database """
-    Pet.remove_all()
+    """ Removes all Items from the database """
+    Item.remove_all()
 
 def check_content_type(content_type):
     """ Checks that the media type is correct """
@@ -229,3 +246,28 @@ def initialize_logging(log_level=logging.INFO):
         app.logger.addHandler(handler)
         app.logger.setLevel(log_level)
         app.logger.info('Logging handler established')
+
+@socketio.on('publish')
+def handle_publish(json_str):
+    data = json.loads(json_str)
+    mqtt.publish(topic, message)
+
+@socketio.on('subscribe')
+def handle_subscribe(json_str):
+    data = json.loads(json_str)
+    mqtt.subscribe(topic)
+
+@mqtt.on_message()
+def handle_mqtt_message(client, userdata, message):
+    data = dict(
+        topic=message.topic,
+        payload=message.payload.decode()
+    )
+    #print('Server 1 handle_mqtt_message: Received message', data['payload'], 'from topic: ', data['topic'])
+    #mqtt.unsubscribe('rmpbpp')
+    #print('Server 1: unsubscribed!')
+    socketio.emit('mqtt_message', data=data)
+
+@mqtt.on_log()
+def handle_logging(client, userdata, level, buf):
+    print(level, buf)
