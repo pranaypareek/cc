@@ -18,3 +18,8 @@ requests==2.13.0
 # Runtime
 honcho
 httpie
+eventlet
+flask_mqtt
+flask_socketio
+flask_bootstrap
+
